@@ -3,16 +3,79 @@
 #include <stdbool.h>
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
+#include <assert.h>
 
+// config
+#define SIZE 32
+//#define NDEBUG
 #define data_type float
 
 typedef struct Matrix {
     data_type *data;
     size_t rows;
     size_t cols;
-    size_t len;
     bool row_major;
 } Matrix;
+
+#define element_wise_kernel_flat(name, operator)                                                        \
+    extern "C" __global__ void name(data_type *res, data_type *a, data_type *b, size_t len) {           \
+        int index = blockIdx.x * blockDim.x + threadIdx.x;                                              \
+        if (index < len) res[index] = a[index] operator b[index];                                       \
+    }
+
+#define element_wise_kernel_t_right(name, operator)                                                     \
+    extern "C" __global__ void name(data_type *res, data_type *a, data_type *b,                         \
+    size_t rows, size_t cols, size_t len) {                                                             \
+        int idx = blockIdx.x * blockDim.x + threadIdx.x;                                                \
+        if (idx < len) {                                                                                \
+            size_t index = (idx * cols) % (rows * cols) + idx / rows;                                   \
+            assert(index < len);                                                                        \
+            res[idx] = a[idx] operator b[index];                                                        \
+        }                                                                                               \
+    }
+
+#define element_wise_kernel_t_left(name, operator)                                                     \
+    extern "C" __global__ void name(data_type *res, data_type *a, data_type *b,                         \
+    size_t rows, size_t cols, size_t len) {                                                             \
+        int idx = blockIdx.x * blockDim.x + threadIdx.x;                                                \
+        if (idx < len) {                                                                                \
+            size_t index = (idx * cols) % (rows * cols) + idx / rows;                                   \
+            assert(index < len);                                                                        \
+            res[idx] = a[index] operator b[idx];                                                        \
+        }                                                                                               \
+    }
+
+#define element_wise_operation(name, flat, transpose)                                                   \
+    extern "C" void name(Matrix res, Matrix a, Matrix b, size_t len) {                                  \
+        int block_size = SIZE*SIZE;                                                                     \
+        int grid_size = (len + block_size - 1) / block_size;                                            \
+        if (a.row_major == b.row_major) {                                                               \
+            flat<<<grid_size, block_size>>>(res.data, a.data, b.data, len);                             \
+        } else {                                                                                        \
+            transpose<<<grid_size, block_size>>>(res.data, a.data, b.data, b.rows, b.cols, len);        \
+        }                                                                                               \
+    }
+
+element_wise_kernel_flat(_matrix_add_flat, +)
+element_wise_kernel_flat(_matrix_sub_flat, -)
+element_wise_kernel_flat(_matrix_mul_flat, *)
+element_wise_kernel_flat(_matrix_div_flat, /)
+
+element_wise_kernel_t_right(_matrix_add_t_right, +)
+element_wise_kernel_t_right(_matrix_sub_t_right, -)
+element_wise_kernel_t_right(_matrix_mul_t_right, *)
+element_wise_kernel_t_right(_matrix_div_t_right, /)
+
+element_wise_kernel_t_left(_matrix_sub_t_left, -)
+element_wise_kernel_t_left(_matrix_div_t_left, /)
+
+element_wise_operation(matrix_add_t_right, _matrix_add_flat, _matrix_add_t_right)
+element_wise_operation(matrix_sub_t_right, _matrix_sub_flat, _matrix_sub_t_right)
+element_wise_operation(matrix_mul_t_right, _matrix_mul_flat, _matrix_mul_t_right)
+element_wise_operation(matrix_div_t_right, _matrix_div_flat, _matrix_div_t_right)
+
+element_wise_operation(matrix_sub_t_left, _matrix_sub_flat, _matrix_sub_t_left)
+element_wise_operation(matrix_div_t_left, _matrix_div_flat, _matrix_div_t_left)
 
 // Perform matrix multiplication using cuBLAS
 extern "C" void dot(Matrix res, Matrix left, Matrix right) {

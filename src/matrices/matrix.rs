@@ -74,7 +74,6 @@ impl Matrix {
             ptr: self.data.ptr,
             rows: self.rows,
             cols: self.cols,
-            len: self.data.len,
             row_major: if self.row_major { 1 } else { 0 },
         }
     }
@@ -85,6 +84,5 @@ pub struct Handle {
     pub ptr: *mut ValueType,
     pub rows: usize,
     pub cols: usize,
-    pub len: usize,
     pub row_major: u8,
 }
