@@ -34,9 +34,11 @@ fn main() {
     // Path to CUDA libraries
     let cuda_lib_path = "/usr/local/cuda/lib64"; // Adjust this path as necessary
 
+    // Link the output directory, CUDA libraries, and relevant CUDA libraries
     println!("cargo:rustc-link-search=native={}", out_dir);
     println!("cargo:rustc-link-search=native={}", cuda_lib_path);
     println!("cargo:rustc-link-lib=static=cuda_kernels");
-    println!("cargo:rustc-link-lib=dylib=cudart");
+    println!("cargo:rustc-link-lib=dylib=cudart"); // CUDA Runtime API
+    println!("cargo:rustc-link-lib=dylib=cublas"); // Link to cuBLAS
 }
 
