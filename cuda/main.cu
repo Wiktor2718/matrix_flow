@@ -4,10 +4,11 @@
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <assert.h>
+#include <curand_kernel.h>
 
 // config
 #define SIZE 32
-//#define NDEBUG
+#define NDEBUG
 #define value_type float
 
 typedef struct Matrix {
@@ -123,16 +124,16 @@ with_matrix_operation(scalar_matrix_div, _scalar_matrix_div);
 
 // matrix operations
 #define apply_kernel(name, transformation)                                                              \
-    __global__ void name(value_type *res, value_type *matrix, size_t size) {                            \
+    __global__ void name(value_type *res, value_type *matrix, size_t len) {                            \
         int index = blockIdx.x * blockDim.x + threadIdx.x;                                              \
-        if (index < size) res[index] = transformation(matrix[index]);                                   \
+        if (index < len) res[index] = transformation(matrix[index]);                                   \
     }
 
 #define apply(name, kernel)                                                                             \
-    extern "C" void name(value_type *res, value_type *matrix, size_t size) {                            \
+    extern "C" void name(value_type *res, value_type *matrix, size_t len) {                            \
         int block_size = SIZE*SIZE;                                                                     \
-        int grid_size = (size + block_size - 1) / block_size;                                           \
-        kernel<<<grid_size, block_size>>>(res, matrix, size);                                           \
+        int grid_size = (len + block_size - 1) / block_size;                                           \
+        kernel<<<grid_size, block_size>>>(res, matrix, len);                                           \
     }
 
 #define Sqware(x) ((x) * (x))
@@ -175,21 +176,66 @@ extern "C" void dot(Matrix res, Matrix left, Matrix right) {
     // Perform matrix multiplication: C = alpha * A * B + beta * C
     cublasSgemm(
         handle,
-        left_op,          // Transpose left if necessary
-        right_op,         // Transpose right if necessary
-        (int)left.rows,   // Number of rows in matrix A and C
-        (int)right.cols,  // Number of columns in matrix B and C
-        (int)left.cols,   // Number of columns in matrix A and rows in matrix B
-        &alpha,           // Scaling factor for the product
-        left.data,        // Matrix A
-        (int)left.rows,   // Leading dimension of A
-        right.data,       // Matrix B
-        (int)right.rows,  // Leading dimension of B
-        &beta,            // Scaling factor for C
-        res.data,         // Result matrix C
-        (int)res.rows     // Leading dimension of C
-    );
+        left_op,                 // Transpose left if necessary
+        right_op,                // Transpose right if necessary
+        (int)left.rows,          // Number of rows in matrix A and C
+        (int)right.cols,         // Number of columns in matrix B and C
+        (int)left.cols,          // Number of columns in matrix A and rows in matrix B
+        &alpha,                  // Scaling factor for the product
+        left.data,               // Matrix A
+        left_op == CUBLAS_OP_T ? (int)left.cols : (int)left.rows,  // Leading dimension of A
+        right.data,              // Matrix B
+        right_op == CUBLAS_OP_T ? (int)right.cols : (int)right.rows, // Leading dimension of B
+        &beta,                   // Scaling factor for C
+        res.data,                // Result matrix C
+        (int)res.rows            // Leading dimension of C
+    ); 
 
     // Clean up cuBLAS handle
     cublasDestroy(handle);
+}
+
+// random
+__global__ void _init_curand_states(curandState *state, unsigned long seed, size_t len) { int idx = threadIdx.x + blockIdx.x * blockDim.x; if (idx < len) curand_init(seed, idx, 0, &state[idx]); }
+
+__global__ void _normal(value_type *res, curandState *state, size_t len) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if (idx < len) res[idx] = curand_normal(&state[idx]);
+}
+
+__global__ void _uniform(value_type *res, curandState *state, size_t len) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if (idx < len) res[idx] = curand_uniform(&state[idx]);
+}
+
+extern "C" void normal(value_type *res, size_t len) {
+    int block_size = SIZE*SIZE;
+    int grid_size = (len + block_size - 1) / block_size;
+
+    curandState *d_states;
+    cudaMalloc(&d_states, len * sizeof(curandState));
+
+    _init_curand_states<<<grid_size, block_size>>>(d_states, time(NULL), len);
+    cudaDeviceSynchronize();
+
+    _normal<<<grid_size, block_size>>>(res, d_states, len);
+    cudaDeviceSynchronize();
+
+    cudaFree(&d_states);
+}
+
+extern "C" void uniform(value_type *res, size_t len) {
+    int block_size = SIZE*SIZE;
+    int grid_size = (len + block_size - 1) / block_size;
+
+    curandState *d_states;
+    cudaMalloc(&d_states, len * sizeof(curandState));
+
+    _init_curand_states<<<grid_size, block_size>>>(d_states, time(NULL), len);
+    cudaDeviceSynchronize();
+
+    _uniform<<<grid_size, block_size>>>(res, d_states, len);
+    cudaDeviceSynchronize();
+
+    cudaFree(&d_states);
 }
