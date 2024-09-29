@@ -8,23 +8,23 @@
 // config
 #define SIZE 32
 //#define NDEBUG
-#define data_type float
+#define value_type float
 
 typedef struct Matrix {
-    data_type *data;
+    value_type *data;
     size_t rows;
     size_t cols;
     bool row_major;
 } Matrix;
 
 #define element_wise_kernel_flat(name, operator)                                                        \
-    extern "C" __global__ void name(data_type *res, data_type *a, data_type *b, size_t len) {           \
+    extern "C" __global__ void name(value_type *res, value_type *a, value_type *b, size_t len) {        \
         int index = blockIdx.x * blockDim.x + threadIdx.x;                                              \
         if (index < len) res[index] = a[index] operator b[index];                                       \
     }
 
 #define element_wise_kernel_t_right(name, operator)                                                     \
-    extern "C" __global__ void name(data_type *res, data_type *a, data_type *b,                         \
+    extern "C" __global__ void name(value_type *res, value_type *a, value_type *b,                      \
     size_t rows, size_t cols, size_t len) {                                                             \
         int idx = blockIdx.x * blockDim.x + threadIdx.x;                                                \
         if (idx < len) {                                                                                \
@@ -34,8 +34,8 @@ typedef struct Matrix {
         }                                                                                               \
     }
 
-#define element_wise_kernel_t_left(name, operator)                                                     \
-    extern "C" __global__ void name(data_type *res, data_type *a, data_type *b,                         \
+#define element_wise_kernel_t_left(name, operator)                                                      \
+    extern "C" __global__ void name(value_type *res, value_type *a, value_type *b,                      \
     size_t rows, size_t cols, size_t len) {                                                             \
         int idx = blockIdx.x * blockDim.x + threadIdx.x;                                                \
         if (idx < len) {                                                                                \
@@ -77,6 +77,81 @@ element_wise_operation(matrix_div_t_right, _matrix_div_flat, _matrix_div_t_right
 element_wise_operation(matrix_sub_t_left, _matrix_sub_flat, _matrix_sub_t_left)
 element_wise_operation(matrix_div_t_left, _matrix_div_flat, _matrix_div_t_left)
 
+// matrix scalar operations
+#define with_scalar_kernel(name, operator)                                                              \
+    __global__ void name(value_type *res, value_type *a, value_type b, size_t len) {                    \
+            int index = blockIdx.x * blockDim.x + threadIdx.x;                                          \
+            if (index < len) res[index] = a[index] operator b;                                          \
+    }
+
+#define with_scalar_operation(name, kernel)                                                             \
+    extern "C" void name(value_type *res, value_type *a, value_type b, size_t len) {                    \
+        int block_size = SIZE*SIZE;                                                                     \
+        int grid_size = (len + block_size - 1) / block_size;                                            \
+        kernel<<<grid_size, block_size>>>(res, a, b, len);                                              \
+    }
+
+with_scalar_kernel(_matrix_scalar_add, +)
+with_scalar_kernel(_matrix_scalar_sub, -)
+with_scalar_kernel(_matrix_scalar_mul, *)
+with_scalar_kernel(_matrix_scalar_div, /)
+
+with_scalar_operation(matrix_scalar_add, _matrix_scalar_add)
+with_scalar_operation(matrix_scalar_sub, _matrix_scalar_sub)
+with_scalar_operation(matrix_scalar_mul, _matrix_scalar_mul)
+with_scalar_operation(matrix_scalar_div, _matrix_scalar_div)
+
+// scalar matrix operations
+#define with_matrix_kernel(name, operator)                                                              \
+    __global__ void name(value_type *res, value_type a, value_type *b, size_t len) {                    \
+            int index = blockIdx.x * blockDim.x + threadIdx.x;                                          \
+            if (index < len) res[index] = a operator b[index];                                          \
+    }
+
+#define with_matrix_operation(name, kernel)                                                             \
+    extern "C" void name(value_type *res, value_type a, value_type *b, size_t len)  {                   \
+        int block_size = SIZE*SIZE;                                                                     \
+        int grid_size = (len + block_size - 1) / block_size;                                            \
+        kernel<<<grid_size, block_size>>>(res, a, b, len);                                              \
+    }
+
+with_matrix_kernel(_scalar_matrix_sub, -)
+with_matrix_kernel(_scalar_matrix_div, /)
+
+with_matrix_operation(scalar_matrix_sub, _scalar_matrix_sub);
+with_matrix_operation(scalar_matrix_div, _scalar_matrix_div);
+
+// matrix operations
+#define apply_kernel(name, transformation)                                                              \
+    __global__ void name(value_type *res, value_type *matrix, size_t size) {                            \
+        int index = blockIdx.x * blockDim.x + threadIdx.x;                                              \
+        if (index < size) res[index] = transformation(matrix[index]);                                   \
+    }
+
+#define apply(name, kernel)                                                                             \
+    extern "C" void name(value_type *res, value_type *matrix, size_t size) {                            \
+        int block_size = SIZE*SIZE;                                                                     \
+        int grid_size = (size + block_size - 1) / block_size;                                           \
+        kernel<<<grid_size, block_size>>>(res, matrix, size);                                           \
+    }
+
+#define Sqware(x) ((x) * (x))
+apply_kernel(_sqware, Sqware)
+apply(sqware, _sqware)
+
+#define Neg(x) -(x)
+apply_kernel(_matrix_neg, Neg)
+apply(matrix_neg, _matrix_neg)
+
+// activations
+#define reLu(x) ( ((x) > 0) ? (x) : ((x) * 0.01) )
+#define reLuP(x) ( ((x) > 0) ? 1. : .01 )
+
+apply_kernel(_relu, reLu)
+apply(relu, _relu)
+apply_kernel(_relu_prime, reLuP)
+apply(relu_prime, _relu_prime)
+
 // Perform matrix multiplication using cuBLAS
 extern "C" void dot(Matrix res, Matrix left, Matrix right) {
     // Check for dimension mismatch
@@ -90,8 +165,8 @@ extern "C" void dot(Matrix res, Matrix left, Matrix right) {
     cublasCreate(&handle);
 
     // Set parameters for cuBLAS
-    const data_type alpha = 1.0f;
-    const data_type beta = 0.0f;
+    const value_type alpha = 1.0f;
+    const value_type beta = 0.0f;
 
     // cuBLAS expects column-major matrices by default, so if row_major is true, we need to transpose the matrices.
     cublasOperation_t left_op = left.row_major ? CUBLAS_OP_T : CUBLAS_OP_N;
