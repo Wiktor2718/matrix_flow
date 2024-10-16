@@ -7,7 +7,8 @@
 #include <curand_kernel.h>
 
 // config
-#define SIZE 32
+#define SIZE 8
+#define BLOCK_SIZE 32
 #define NDEBUG
 #define value_type float
 
@@ -238,4 +239,127 @@ extern "C" void uniform(value_type *res, size_t len) {
     cudaDeviceSynchronize();
 
     cudaFree(&d_states);
+}
+
+// MLP
+typedef struct {
+    value_type *ptr;
+    size_t rows;
+    size_t cols;
+} RM_Handle;
+
+__global__ void _forward_mlp(float* X, float* W, float* B, float* Y, size_t N, size_t D, size_t M) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (row < N && col < M) {
+        float value = 0.0f;
+        for (int k = 0; k < D; ++k) {
+            value += X[row * D + k] * W[k * M + col];  // XW multiplication
+        }
+        value += B[col];  // Add bias
+        Y[row * M + col] = value;
+    }
+}
+
+extern "C" void forward_mlp(RM_Handle X, RM_Handle W, RM_Handle B, RM_Handle Y) {
+    size_t N = X.rows;
+    size_t D = W.rows;
+    size_t M = W.cols;
+
+    dim3 blockDim(SIZE, SIZE);
+    dim3 gridDim((M + blockDim.x - 1) / blockDim.x, (N + blockDim.y - 1) / blockDim.y);
+
+    _forward_mlp<<<gridDim, blockDim>>>(X.ptr, W.ptr, B.ptr, Y.ptr, N, D, M);
+}
+
+__global__ void _backward_mlp(float* X, float* W, float* dY, float* dW, float* dB, float* dX, size_t N, size_t D, size_t M) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // Gradient with respect to bias (dB)
+    if (row == 0 && col < M) {
+        float sum = 0.0f;
+        for (int i = 0; i < N; ++i) {
+            sum += dY[i * M + col];
+        }
+        dB[col] = sum;
+    }
+
+    // Gradient with respect to weights (dW) = X^T * dY
+    if (row < D && col < M) {
+        float dw_val = 0.0f;
+        for (int i = 0; i < N; ++i) {
+            dw_val += X[i * D + row] * dY[i * M + col];
+        }
+        dW[row * M + col] = dw_val;
+    }
+
+    // Gradient with respect to input (dX) = dY * W^T
+    if (row < N && col < D) {
+        float dx_val = 0.0f;
+        for (int k = 0; k < M; ++k) {
+            dx_val += dY[row * M + k] * W[col * M + k];
+        }
+        dX[row * D + col] = dx_val;
+    }
+}
+
+extern "C" void backward_mlp(RM_Handle X, RM_Handle W, RM_Handle dY, RM_Handle dW, RM_Handle dB, RM_Handle dX) {
+    size_t N = X.rows;
+    size_t D = W.rows;
+    size_t M = W.cols;
+
+    dim3 blockDim(SIZE, SIZE);
+    dim3 gridDim((M + blockDim.x - 1) / blockDim.x, (D + blockDim.y - 1) / blockDim.y);
+    _backward_mlp<<<gridDim, blockDim>>>(X.ptr, W.ptr, dY.ptr, dW.ptr, dB.ptr, dX.ptr, N, D, M);
+}
+
+__global__ void _update_params(float* W, float* dW, float* B, float* dB, float learning_rate, size_t D, size_t M) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // Update weights
+    if (row < D && col < M) {
+        W[row * M + col] -= learning_rate * dW[row * M + col];
+    }
+
+    // Update biases
+    if (row == 0 && col < M) {
+        B[col] -= learning_rate * dB[col];
+    }
+}
+
+extern "C" void update_params(RM_Handle W, RM_Handle dW, RM_Handle B, RM_Handle dB, value_type learning_rate) {
+    size_t D = W.rows;
+    size_t M = W.cols;
+
+    dim3 blockDim(SIZE, SIZE);
+    dim3 gridDim((M + blockDim.x - 1) / blockDim.x, (D + blockDim.y - 1) / blockDim.y);
+    _update_params<<<gridDim, blockDim>>>(W.ptr, dW.ptr, B.ptr, dB.ptr, learning_rate, D, M);
+}
+
+__global__ void _forward_leaky_relu(float* Y, float* X, size_t len) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < len) Y[i] = reLu(X[i]);
+}
+
+extern "C" void forward_leaky_relu(RM_Handle Y, RM_Handle X) {
+    size_t len = X.rows * X.cols;
+
+    int block_size = BLOCK_SIZE;
+    int grid_size = (len + block_size - 1) / block_size;
+    _forward_leaky_relu<<<grid_size, block_size>>>(Y.ptr, X.ptr, len);
+}
+__global__ void _backward_leaky_relu(float* dY, float* X, float* dX, size_t len) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < len) dX[i] = dY[i] * reLuP(X[i]);
+}
+
+extern "C" void backward_leaky_relu(RM_Handle dY, RM_Handle X, RM_Handle dX) {
+    size_t len = X.rows * X.cols;
+
+    int block_size = BLOCK_SIZE;
+    int grid_size = (len + block_size - 1) / block_size;
+    _backward_leaky_relu<<<grid_size, block_size>>>(dY.ptr, X.ptr, dX.ptr, len);
 }

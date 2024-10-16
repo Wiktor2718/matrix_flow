@@ -70,7 +70,7 @@ fn mse_prime(y_true: &Matrix, y_pred: &Matrix) -> Matrix {
     2. * t / (y_true.len() as f32)
 }
 
-fn print_2d_matrix(matrix: &Matrix) { // It is only for debugging
+fn print_matrix(matrix: &Matrix) { // It is only for debugging
     for i in 0..matrix.rows {
         for j in 0..matrix.cols {
             print!("{} ", matrix.read_from_index([i, j]));
@@ -95,7 +95,7 @@ fn main() {
                                                       Box::new(Dense::new(1000, 1))];
 
     const EPOCHS: u32 = 10000;
-    const LEARNING_RATE: f32 = 0.001;
+    const LEARNING_RATE: f32 = 0.0001;
 
     for e in 0..EPOCHS {
         let mut error: f32 = 0.;

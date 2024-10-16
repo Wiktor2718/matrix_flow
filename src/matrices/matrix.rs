@@ -77,12 +77,28 @@ impl Matrix {
             row_major: if self.row_major { 1 } else { 0 },
         }
     }
+
+    pub fn row_major_handle(&self) -> RM_Handle {
+        assert!(self.row_major, "RM_Handle: Matrix is not row-major");
+        RM_Handle {
+            ptr: self.data.ptr,
+            rows: self.rows,
+            cols: self.cols,
+        }
+    }
 }
 
-#[repr(C)]
+#[repr(C)] #[derive(Clone, Copy, Debug)]
 pub struct Handle {
     pub ptr: *mut ValueType,
     pub rows: usize,
     pub cols: usize,
     pub row_major: u8,
+}
+
+#[repr(C)] #[derive(Clone, Copy, Debug)]
+pub struct RM_Handle {
+    pub ptr: *mut ValueType,
+    pub rows: usize,
+    pub cols: usize,
 }

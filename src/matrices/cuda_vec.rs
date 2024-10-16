@@ -132,7 +132,8 @@ pub fn memcpy<T>(source: *const T, dist: *mut T, len: usize, kind: cudaMemcpyKin
     }
     Ok(())
 }
-fn error_string(error: u32) -> String {
+
+pub fn error_string(error: u32) -> String {
     unsafe {
         CStr::from_ptr(cudaGetErrorString(error)).to_string_lossy().into_owned()
     }

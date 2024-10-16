@@ -11,7 +11,15 @@ fn main() {
     // Compile the CUDA code into an object file with PIC
     let cuda_arch = "sm_86"; // Adjust the architecture as needed
     let nvcc_status = Command::new("nvcc")
-        .args(&["-arch", cuda_arch, "-Xcompiler", "-fPIC", "cuda/main.cu", "-c", "-o"])
+        .args(&[
+            "-arch", cuda_arch,
+            "-Xcompiler", "-fPIC",
+            "-O3",                  // Maximum optimization
+            "--use_fast_math",      // Enable fast math optimizations
+            "--ptxas-options=-v",   // Verbose output from PTX assembler
+            "cuda/main.cu",
+            "-c",
+            "-o"])
         .arg(format!("{}/main.o", out_dir))
         .status()
         .expect("Failed to compile CUDA code");
