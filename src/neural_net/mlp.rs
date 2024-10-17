@@ -74,7 +74,7 @@ impl MLP {
     }
 }
 
-type Layer = (usize, usize, ActivationType);
+pub type Layer = (usize, usize, ActivationType);
 
 #[derive(Clone, Copy, Debug)]
 pub struct LayerData {

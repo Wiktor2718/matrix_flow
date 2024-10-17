@@ -1,7 +1,6 @@
 use crate::{matrices::matrix::{Matrix, RM_Handle}, neural_net::mlp::MLP, prelude::memcpy};
 use crate::matrices::cuda_vec::*;
-
-use super::mlp::{ActivationType, LayerData};
+use super::mlp::ActivationType;
 
 extern "C" {
     fn forward_mlp(x: RM_Handle, w: RM_Handle, b: RM_Handle, y: RM_Handle);
@@ -11,7 +10,7 @@ extern "C" {
 }
 
 impl MLP {
-    pub fn forward(&self, batch: Matrix) -> Matrix {
+    pub fn forward(&self, batch: &Matrix) -> Matrix {
         let last_layer = self.layers_data.last().unwrap();
         let res = Matrix::new(last_layer.output.rows, last_layer.output.cols);
 
@@ -22,7 +21,6 @@ impl MLP {
             let next_data_handle = self.layers_data
                 .get(idx + 1)
                 .map_or(res.row_major_handle(), |layer| layer.input);
-            println!("h: {:?}", next_data_handle);
 
             match layer.2 {
                 ActivationType::Linear => unsafe {
@@ -35,7 +33,6 @@ impl MLP {
                 ActivationType::ReLu => unsafe {
                     forward_mlp(data.input, data.weights, data.biases, data.output);
                     cudaDeviceSynchronize();
-                    println!("{}x{}", next_data_handle.rows, next_data_handle.cols);
                     forward_leaky_relu(next_data_handle, data.output);
                     cudaDeviceSynchronize();
                 }
@@ -47,7 +44,7 @@ impl MLP {
         res
     }
 
-    fn batch_to_mlp(&self, batch: Matrix) {
+    fn batch_to_mlp(&self, batch: &Matrix) {
         let err = memcpy(
             batch.data.ptr,
             self.layers_data[0].input.ptr,
@@ -86,7 +83,7 @@ mod tests {
             2);
 
         let batch = Matrix::from([1., 2., 3., 4.], 2, 2);
-        println!("{:?}", net.forward(batch).as_vec());
+        println!("{:?}", net.forward(&batch).as_vec());
         println!("{:?}", net.data_block.as_vec());
     }
 
