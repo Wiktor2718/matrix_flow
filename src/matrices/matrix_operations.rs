@@ -58,6 +58,7 @@ impl Matrix {
         let res = self.empty_clone();
         unsafe {
             sqware(res.data.ptr, self.data.ptr, self.len());
+            cudaDeviceSynchronize();
         }
         res
     }

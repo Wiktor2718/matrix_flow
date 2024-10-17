@@ -38,12 +38,12 @@ impl MLP {
                         data.weights_gradient,
                         data.biases,
                         data.biases_gradient,
-                        0.01,
+                        0.001,
                     );
                     cudaDeviceSynchronize();
                 }
                 ActivationType::ReLu => unsafe {
-                    backward_leaky_relu(next_data_handle, data.input, data.output_gradient);
+                    backward_leaky_relu(next_data_handle, data.output, data.output_gradient);
                     cudaDeviceSynchronize();
                     backward_mlp(
                         data.input,
@@ -59,7 +59,7 @@ impl MLP {
                         data.weights_gradient,
                         data.biases,
                         data.biases_gradient,
-                        0.01,
+                        0.001,
                     );
                     cudaDeviceSynchronize();
                 }

@@ -1,5 +1,5 @@
 use matrix_flow::prelude::*;
-use std::iter::zip;
+use std::{iter::zip, time::Instant};
 
 fn mse(y_true: &Matrix, y_pred: &Matrix) -> f32 {
     let t = y_pred - y_true;
@@ -21,6 +21,7 @@ fn print_matrix(matrix: &Matrix) { // It is only for debugging
 }
 
 fn main() {
+    let start = Instant::now();
     let input_data: Vec<Matrix> = vec![Matrix::from(vec![0., 0.], 2, 1),
                                        Matrix::from(vec![0., 1.], 2, 1),
                                        Matrix::from(vec![1., 0.], 2, 1),
@@ -32,8 +33,8 @@ fn main() {
                                         Matrix::from(vec![0.], 1, 1)];
 
     let network  = MLP::new([
-        (2, 30, ActivationType::ReLu),
-        (30, 1, ActivationType::Linear),
+        (2, 1000, ActivationType::ReLu),
+        (1000, 1, ActivationType::Linear),
     ], 1);
 
     const EPOCHS: u32 = 10000;
@@ -50,5 +51,6 @@ fn main() {
         }
         println!("{e}: {}", error / input_data.len() as f32);
     }
+    println!("it took {:?}", start.elapsed());
 
 }
