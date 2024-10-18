@@ -22,20 +22,22 @@ fn print_matrix(matrix: &Matrix) { // It is only for debugging
 
 fn main() {
     let start = Instant::now();
-    let input_data: Vec<Matrix> = vec![Matrix::from(vec![0., 0.], 2, 1),
-                                       Matrix::from(vec![0., 1.], 2, 1),
-                                       Matrix::from(vec![1., 0.], 2, 1),
-                                       Matrix::from(vec![1., 1.], 2, 1)];
+    let input_data: Vec<Matrix> = vec![Matrix::from([0., 0.], 2, 1),
+                                       Matrix::from([0., 1.], 2, 1),
+                                       Matrix::from([1., 0.], 2, 1),
+                                       Matrix::from([1., 1.], 2, 1)];
 
-    let output_data: Vec<Matrix> = vec![Matrix::from(vec![0.], 1, 1),
-                                        Matrix::from(vec![1.], 1, 1),
-                                        Matrix::from(vec![1.], 1, 1),
-                                        Matrix::from(vec![0.], 1, 1)];
+    let output_data: Vec<Matrix> = vec![Matrix::from([0.], 1, 1),
+                                        Matrix::from([1.], 1, 1),
+                                        Matrix::from([1.], 1, 1),
+                                        Matrix::from([0.], 1, 1)];
 
-    let network  = MLP::new([
-        (2, 1000, ActivationType::ReLu),
-        (1000, 1, ActivationType::Linear),
-    ], 1);
+    let network  = MLP::new(1, 0.001, [
+        Layer::new(2,    1000, ActivationType::Tanh),
+        Layer::new(1000, 1000, ActivationType::Tanh),
+        Layer::new(1000, 1000, ActivationType::Sigmoid),
+        Layer::new(1000, 1,    ActivationType::Linear),
+    ]);
 
     const EPOCHS: u32 = 10000;
 

@@ -146,13 +146,19 @@ apply_kernel(_matrix_neg, Neg)
 apply(matrix_neg, _matrix_neg)
 
 // activations
-#define reLu(x) ( ((x) > 0) ? (x) : ((x) * 0.01) )
-#define reLuP(x) ( ((x) > 0) ? 1. : .01 )
+#define LreLu(x) ( ((x) > 0) ? (x) : ((x) * 0.01) )
+#define LreLuP(x) ( ((x) > 0) ? 1. : .01 )
+#define Tanh(x) ( tanhf((x)) )
+#define Sigmoid(x) ( 1.0f / (1.0f + expf(-(x))) )
 
-apply_kernel(_relu, reLu)
-apply(relu, _relu)
-apply_kernel(_relu_prime, reLuP)
-apply(relu_prime, _relu_prime)
+apply_kernel(_leaky_relu, LreLu)
+apply(leaky_relu, _leaky_relu)
+apply_kernel(_leaky_relu_prime, LreLuP)
+apply(leaky_relu_prime, _leaky_relu_prime)
+apply_kernel(_matrix_tanh, Tanh)
+apply(matrix_tanh, _matrix_tanh)
+apply_kernel(_sigmoid, Sigmoid)
+apply(sigmoid, _sigmoid)
 
 // Perform matrix multiplication using cuBLAS
 extern "C" void dot(Matrix res, Matrix left, Matrix right) {
@@ -338,28 +344,47 @@ extern "C" void update_params(RM_Handle W, RM_Handle dW, RM_Handle B, RM_Handle 
     dim3 gridDim((M + blockDim.x - 1) / blockDim.x, (D + blockDim.y - 1) / blockDim.y);
     _update_params<<<gridDim, blockDim>>>(W.ptr, dW.ptr, B.ptr, dB.ptr, learning_rate, D, M);
 }
+#define row_major_apply(name, kernel) \
+    extern "C" void name(RM_Handle Y, RM_Handle X) { \
+        int len = X.rows * X.cols; \
+        int block_size = BLOCK_SIZE; \
+        int grid_size = (len + block_size - 1) / block_size; \
+        kernel<<<grid_size, block_size>>>(Y.ptr, X.ptr, len); \
+    }
 
-__global__ void _forward_leaky_relu(float* Y, float* X, size_t len) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < len) Y[i] = reLu(X[i]);
-}
+row_major_apply(forward_leaky_relu, _leaky_relu)
+row_major_apply(forward_tanh, _matrix_tanh)
+row_major_apply(forward_sigmoid, _sigmoid)
 
-extern "C" void forward_leaky_relu(RM_Handle Y, RM_Handle X) {
-    size_t len = X.rows * X.cols;
-
-    int block_size = BLOCK_SIZE;
-    int grid_size = (len + block_size - 1) / block_size;
-    _forward_leaky_relu<<<grid_size, block_size>>>(Y.ptr, X.ptr, len);
-}
 __global__ void _backward_leaky_relu(float* dY, float* X, float* dX, size_t len) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < len) dX[i] = dY[i] * reLuP(X[i]);
+    if (i < len) dX[i] = dY[i] * LreLuP(X[i]);
 }
 
-extern "C" void backward_leaky_relu(RM_Handle dY, RM_Handle X, RM_Handle dX) {
-    size_t len = X.rows * X.cols;
-
-    int block_size = BLOCK_SIZE;
-    int grid_size = (len + block_size - 1) / block_size;
-    _backward_leaky_relu<<<grid_size, block_size>>>(dY.ptr, X.ptr, dX.ptr, len);
+__global__ void _backward_tanh(float* dY, float* X, float* dX, size_t len) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < len) {
+        float tanh_val = Tanh(X[i]);
+        dX[i] = dY[i] * (1.0f - tanh_val * tanh_val);
+    }
 }
+
+__global__ void _backward_sigmoid(float* dY, float* X, float* dX, size_t len) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < len) {
+        float sigmoid_val = Sigmoid(X[i]);
+        dX[i] = dY[i] * (sigmoid_val * (1.0f - sigmoid_val));
+    }
+}
+
+#define activation_backward(name, kernel) \
+    extern "C" void name(RM_Handle dY, RM_Handle X, RM_Handle dX) { \
+        int len = X.rows * X.cols; \
+        int block_size = BLOCK_SIZE; \
+        int grid_size = (len + block_size - 1) / block_size; \
+        kernel<<<grid_size, block_size>>>(dY.ptr, X.ptr, dX.ptr, len); \
+    }
+
+activation_backward(backward_leaky_relu, _backward_leaky_relu)
+activation_backward(backward_tanh, _backward_tanh)
+activation_backward(backward_sigmoid, _backward_sigmoid)

@@ -5,6 +5,8 @@ use super::mlp::ActivationType;
 extern "C" {
     fn backward_mlp(x: RM_Handle, w: RM_Handle, d_y: RM_Handle, d_w: RM_Handle, d_b: RM_Handle, d_x: RM_Handle);
     fn backward_leaky_relu(d_y: RM_Handle, x: RM_Handle, d_x: RM_Handle);
+    fn backward_sigmoid(d_y: RM_Handle, x: RM_Handle, d_x: RM_Handle);
+    fn backward_tanh(d_y: RM_Handle, x: RM_Handle, d_x: RM_Handle);
 
     fn update_params(w: RM_Handle, d_w: RM_Handle, b: RM_Handle, d_b: RM_Handle, learning_rate: ValueType);
 
@@ -19,52 +21,44 @@ impl MLP {
                 .get(idx + 1)
                 .map_or(grad.row_major_handle(), |layer| layer.input_gradient);
 
-            match layer.2 {
-                ActivationType::Linear => unsafe {
+            match layer.activation {
+                ActivationType::Linear => {
                     if idx == self.layers.len() - 1 {
                         self.grad_to_mlp(grad);
                     }
-                    backward_mlp(
-                        data.input,
-                        data.weights,
-                        data.output_gradient,
-                        data.weights_gradient,
-                        data.biases_gradient,
-                        data.input_gradient,
-                    );
-                    cudaDeviceSynchronize();
-                    update_params(
-                        data.weights,
-                        data.weights_gradient,
-                        data.biases,
-                        data.biases_gradient,
-                        0.001,
-                    );
-                    cudaDeviceSynchronize();
                 }
                 ActivationType::ReLu => unsafe {
                     backward_leaky_relu(next_data_handle, data.output, data.output_gradient);
                     cudaDeviceSynchronize();
-                    backward_mlp(
-                        data.input,
-                        data.weights,
-                        data.output_gradient,
-                        data.weights_gradient,
-                        data.biases_gradient,
-                        data.input_gradient,
-                    );
-                    cudaDeviceSynchronize();
-                    update_params(
-                        data.weights,
-                        data.weights_gradient,
-                        data.biases,
-                        data.biases_gradient,
-                        0.001,
-                    );
+                }
+                ActivationType::Sigmoid => unsafe {
+                    backward_sigmoid(next_data_handle, data.output, data.output_gradient);
                     cudaDeviceSynchronize();
                 }
-                ActivationType::Sigmoid => todo!("implement sigmoid"),
-                ActivationType::Tanh => todo!("implement tanh"), 
+                ActivationType::Tanh => unsafe {
+                    backward_tanh(next_data_handle, data.output, data.output_gradient);
+                    cudaDeviceSynchronize();
+                } 
+            }
+
+            unsafe {
+                backward_mlp(
+                    data.input,
+                    data.weights,
+                    data.output_gradient,
+                    data.weights_gradient,
+                    data.biases_gradient,
+                    data.input_gradient,
+                );
+                cudaDeviceSynchronize();
+                update_params(
+                    data.weights,
+                    data.weights_gradient,
+                    data.biases,
+                    data.biases_gradient,
+                    self.learning_rate,
+                );
+                cudaDeviceSynchronize();
             }
         }
 
@@ -104,14 +98,14 @@ impl MLP {
 
 #[cfg(test)]
 mod tests {
-    use crate::{neural_net::mlp::{ActivationType, MLP}, prelude::Matrix};
+    use crate::{neural_net::mlp::{ActivationType, MLP, Layer}, prelude::Matrix};
 
     #[test]
     fn forward() {
-        let net = MLP::new([
-            (2, 3, ActivationType::ReLu),
-            (3, 1, ActivationType::ReLu)],
-            2);
+        let net = MLP::new(2, 0.01, [
+            Layer::new(2, 3, ActivationType::ReLu),
+            Layer::new(3, 1, ActivationType::ReLu)],
+        );
 
         let loss_prime = Matrix::from([3., 4.], 1, 2);
         println!("{:?}", net.backward(&loss_prime).as_vec());

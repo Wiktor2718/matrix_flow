@@ -5,6 +5,8 @@ use super::mlp::ActivationType;
 extern "C" {
     fn forward_mlp(x: RM_Handle, w: RM_Handle, b: RM_Handle, y: RM_Handle);
     fn forward_leaky_relu(y: RM_Handle, x: RM_Handle);
+    fn forward_sigmoid(y: RM_Handle, x: RM_Handle);
+    fn forward_tanh(y: RM_Handle, x: RM_Handle);
 
     fn cudaDeviceSynchronize();
 }
@@ -22,22 +24,29 @@ impl MLP {
                 .get(idx + 1)
                 .map_or(res.row_major_handle(), |layer| layer.input);
 
-            match layer.2 {
-                ActivationType::Linear => unsafe {
-                    forward_mlp(data.input, data.weights, data.biases, data.output);
-                    cudaDeviceSynchronize();
+            unsafe {
+                forward_mlp(data.input, data.weights, data.biases, data.output);
+                cudaDeviceSynchronize();
+            }
+
+            match layer.activation {
+                ActivationType::Linear => {
                     if idx == self.layers.len() - 1 {
                         self.output_from_mlp(&res);
                     }
                 }
                 ActivationType::ReLu => unsafe {
-                    forward_mlp(data.input, data.weights, data.biases, data.output);
-                    cudaDeviceSynchronize();
                     forward_leaky_relu(next_data_handle, data.output);
                     cudaDeviceSynchronize();
                 }
-                ActivationType::Sigmoid => todo!("implement sigmoid"),
-                ActivationType::Tanh => todo!("implement tanh"), 
+                ActivationType::Sigmoid => unsafe {
+                    forward_sigmoid(next_data_handle, data.output);
+                    cudaDeviceSynchronize();
+                }
+                ActivationType::Tanh => unsafe {
+                    forward_tanh(next_data_handle, data.output);
+                    cudaDeviceSynchronize();
+                }
             }
         }
 
@@ -73,14 +82,14 @@ impl MLP {
 
 #[cfg(test)]
 mod tests {
-    use crate::{neural_net::mlp::{ActivationType, MLP}, prelude::Matrix};
+    use crate::{neural_net::mlp::{ActivationType, MLP, Layer}, prelude::Matrix};
 
     #[test]
     fn forward() {
-        let net = MLP::new([
-            (2, 3, ActivationType::ReLu),
-            (3, 1, ActivationType::Linear)],
-            2);
+        let net = MLP::new(2, 0.01, [
+            Layer::new(2, 3, ActivationType::ReLu),
+            Layer::new(3, 1, ActivationType::Linear)],
+        );
 
         let batch = Matrix::from([1., 2., 3., 4.], 2, 2);
         println!("{:?}", net.forward(&batch).as_vec());
