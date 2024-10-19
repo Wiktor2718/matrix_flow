@@ -388,3 +388,65 @@ __global__ void _backward_sigmoid(float* dY, float* X, float* dX, size_t len) {
 activation_backward(backward_leaky_relu, _backward_leaky_relu)
 activation_backward(backward_tanh, _backward_tanh)
 activation_backward(backward_sigmoid, _backward_sigmoid)
+
+// optimizers
+__global__ void _adam_update_params(
+    float* W, float* dW, float* B, float* dB, 
+    float* mW, float* vW, float* mB, float* vB,
+    float beta1, float beta2, float beta1_t, float beta2_t, 
+    float learning_rate, float epsilon, 
+    size_t D, size_t M) 
+{
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // Update weights
+    if (row < D && col < M) {
+        int index = row * M + col;
+
+        // Adam update for weights
+        mW[index] = beta1 * mW[index] + (1.0f - beta1) * dW[index];
+        vW[index] = beta2 * vW[index] + (1.0f - beta2) * (dW[index] * dW[index]);
+
+        // Compute bias-corrected moments
+        float mW_hat = mW[index] / (1.0f - beta1_t);
+        float vW_hat = vW[index] / (1.0f - beta2_t);
+
+        // Update weights
+        W[index] -= learning_rate * mW_hat / (sqrtf(vW_hat) + epsilon);
+    }
+
+    // Update biases
+    if (row == 0 && col < M) {
+        // Adam update for biases
+        mB[col] = beta1 * mB[col] + (1.0f - beta1) * dB[col];
+        vB[col] = beta2 * vB[col] + (1.0f - beta2) * (dB[col] * dB[col]);
+
+        // Compute bias-corrected moments
+        float mB_hat = mB[col] / (1.0f - beta1_t);
+        float vB_hat = vB[col] / (1.0f - beta2_t);
+
+        // Update biases
+        B[col] -= learning_rate * mB_hat / (sqrtf(vB_hat) + epsilon);
+    }
+}
+
+extern "C" void adam_update_params(
+    RM_Handle W, RM_Handle dW, RM_Handle B, RM_Handle dB, 
+    RM_Handle mW, RM_Handle vW, RM_Handle mB, RM_Handle vB, 
+    value_type beta1, value_type beta2, 
+    value_type beta1_t, value_type beta2_t, 
+    value_type learning_rate, value_type epsilon) 
+{
+    size_t D = W.rows;
+    size_t M = W.cols;
+
+    dim3 blockDim(SIZE, SIZE);
+    dim3 gridDim((M + blockDim.x - 1) / blockDim.x, (D + blockDim.y - 1) / blockDim.y);
+    
+    _adam_update_params<<<gridDim, blockDim>>>(
+        W.ptr, dW.ptr, B.ptr, dB.ptr, 
+        mW.ptr, vW.ptr, mB.ptr, vB.ptr, 
+        beta1, beta2, beta1_t, beta2_t, 
+        learning_rate, epsilon, D, M);
+}

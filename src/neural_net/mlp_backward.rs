@@ -1,6 +1,6 @@
 use crate::{matrices::matrix::{Matrix, RM_Handle}, neural_net::mlp::MLP, prelude::memcpy};
 use crate::matrices::cuda_vec::*;
-use super::mlp::ActivationType;
+use super::{adam::Adam, mlp::{ActivationType, Optimizer}};
 
 extern "C" {
     fn backward_mlp(x: RM_Handle, w: RM_Handle, d_y: RM_Handle, d_w: RM_Handle, d_b: RM_Handle, d_x: RM_Handle);
@@ -9,6 +9,12 @@ extern "C" {
     fn backward_tanh(d_y: RM_Handle, x: RM_Handle, d_x: RM_Handle);
 
     fn update_params(w: RM_Handle, d_w: RM_Handle, b: RM_Handle, d_b: RM_Handle, learning_rate: ValueType);
+    fn adam_update_params(
+        W: RM_Handle, dW: RM_Handle, B: RM_Handle, dB: RM_Handle,
+        mW: RM_Handle, vW: RM_Handle, mB: RM_Handle, vB: RM_Handle,
+        beta1: ValueType, beta2: ValueType, beta1_t: ValueType, beta2_t: ValueType,
+        learning_rate: ValueType, epsilon: ValueType,
+    );
 
     fn cudaDeviceSynchronize();
 }
@@ -21,6 +27,7 @@ impl MLP {
                 .get(idx + 1)
                 .map_or(grad.row_major_handle(), |layer| layer.input_gradient);
 
+            // activation backward
             match layer.activation {
                 ActivationType::Linear => {
                     if idx == self.layers.len() - 1 {
@@ -41,6 +48,7 @@ impl MLP {
                 } 
             }
 
+            // dense backward
             unsafe {
                 backward_mlp(
                     data.input,
@@ -51,14 +59,29 @@ impl MLP {
                     data.input_gradient,
                 );
                 cudaDeviceSynchronize();
-                update_params(
-                    data.weights,
-                    data.weights_gradient,
-                    data.biases,
-                    data.biases_gradient,
-                    self.learning_rate,
-                );
-                cudaDeviceSynchronize();
+            }
+
+            // optim
+            match &self.optimizer {
+                Optimizer::SGD => unsafe {
+                    update_params(
+                        data.weights,
+                        data.weights_gradient,
+                        data.biases,
+                        data.biases_gradient,
+                        self.learning_rate,
+                    );
+                    cudaDeviceSynchronize();
+                }
+                Optimizer::Adam(adam) => unsafe {
+                    let optimizer_data = &adam.optimizer_data[idx];
+                    adam_update_params(
+                        data.weights, data.weights_gradient, data.biases, data.biases_gradient,
+                        optimizer_data.m_weights, optimizer_data.v_weights, optimizer_data.m_biases, optimizer_data.v_biases,
+                        adam.beta1, adam.beta2, adam.beta1_t_decayed, adam.beta2_t_decayed,
+                        self.learning_rate, adam.epsilon);
+                    cudaDeviceSynchronize();
+                }
             }
         }
 
@@ -98,11 +121,11 @@ impl MLP {
 
 #[cfg(test)]
 mod tests {
-    use crate::{neural_net::mlp::{ActivationType, MLP, Layer}, prelude::Matrix};
+    use crate::{neural_net::mlp::{ActivationType, MLP, Layer, Optimizer}, prelude::Matrix};
 
     #[test]
     fn forward() {
-        let net = MLP::new(2, 0.01, [
+        let net = MLP::new(2, 0.01, Optimizer::SGD, [
             Layer::new(2, 3, ActivationType::ReLu),
             Layer::new(3, 1, ActivationType::ReLu)],
         );

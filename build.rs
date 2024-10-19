@@ -48,5 +48,6 @@ fn main() {
     println!("cargo:rustc-link-lib=static=cuda_kernels");
     println!("cargo:rustc-link-lib=dylib=cudart"); // CUDA Runtime API
     println!("cargo:rustc-link-lib=dylib=cublas"); // Link to cuBLAS
+    println!("cargo:rustc-link-lib=dylib=nvToolsExt"); // Link nvtx
 }
 

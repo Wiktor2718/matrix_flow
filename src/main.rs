@@ -1,4 +1,4 @@
-use matrix_flow::prelude::*;
+use matrix_flow::{neural_net::{adam::Adam, mlp::Optimizer}, prelude::*};
 use std::{iter::zip, time::Instant};
 
 fn mse(y_true: &Matrix, y_pred: &Matrix) -> f32 {
@@ -31,13 +31,14 @@ fn main() {
                                         Matrix::from([1.], 1, 1),
                                         Matrix::from([1.], 1, 1),
                                         Matrix::from([0.], 1, 1)];
-
-    let network  = MLP::new(1, 0.001, [
-        Layer::new(2,    1000, ActivationType::Tanh),
-        Layer::new(1000, 1000, ActivationType::Tanh),
-        Layer::new(1000, 1000, ActivationType::Sigmoid),
-        Layer::new(1000, 1,    ActivationType::Linear),
-    ]);
+    let layers = [
+        Layer::new(2,    100, ActivationType::Tanh),
+        Layer::new(100, 100, ActivationType::Tanh),
+        Layer::new(100, 100, ActivationType::Sigmoid),
+        Layer::new(100, 1,    ActivationType::Linear),
+    ];
+    let optim = Optimizer::Adam(Adam::new(layers, 0.9, 0.999, 1e-7));
+    let network  = MLP::new(1, 0.001, optim, layers);
 
     const EPOCHS: u32 = 10000;
 

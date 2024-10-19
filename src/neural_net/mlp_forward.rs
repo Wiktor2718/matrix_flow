@@ -82,11 +82,11 @@ impl MLP {
 
 #[cfg(test)]
 mod tests {
-    use crate::{neural_net::mlp::{ActivationType, MLP, Layer}, prelude::Matrix};
+    use crate::{neural_net::mlp::{ActivationType, MLP, Layer, Optimizer}, prelude::Matrix};
 
     #[test]
     fn forward() {
-        let net = MLP::new(2, 0.01, [
+        let net = MLP::new(2, 0.01, Optimizer::SGD, [
             Layer::new(2, 3, ActivationType::ReLu),
             Layer::new(3, 1, ActivationType::Linear)],
         );

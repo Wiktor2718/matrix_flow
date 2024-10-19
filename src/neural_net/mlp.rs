@@ -1,4 +1,5 @@
 use crate::{matrices::matrix::RM_Handle, prelude::{CudaVec, ValueType}};
+use crate::neural_net::adam::Adam;
 use std::sync::Arc;
 
 extern "C" {
@@ -9,11 +10,12 @@ pub struct MLP {
     pub data_block: Arc<CudaVec<ValueType>>,
     pub layers: Vec<Layer>,
     pub layers_data: Vec<LayerData>,
-    pub learning_rate: ValueType
+    pub learning_rate: ValueType,
+    pub optimizer: Optimizer,
 }
 
 impl MLP {
-    pub fn new<T: AsRef<[Layer]>>(batch_size: usize, learning_rate: ValueType, layers: T) -> Self {
+    pub fn new<T: AsRef<[Layer]>>(batch_size: usize, learning_rate: ValueType, optimizer: Optimizer, layers: T) -> Self {
         let layers = layers.as_ref();
         let len = Self::calculate_len(layers, batch_size);
 
@@ -55,7 +57,7 @@ impl MLP {
                 });
             }
         }
-        Self { data_block, layers: layers.to_vec(), layers_data, learning_rate }
+        Self { data_block, layers: layers.to_vec(), layers_data, learning_rate, optimizer }
     }
 
     fn calculate_len(layers: &[Layer], batch_size: usize) -> usize {
@@ -111,13 +113,19 @@ pub enum ActivationType {
     // all possible activations
 }
 
+pub enum Optimizer {
+    SGD,
+    Adam(Adam),
+    // all possible optimizers
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::neural_net::mlp::{MLP, ActivationType, Layer};
+    use crate::neural_net::mlp::{MLP, ActivationType, Layer, Optimizer};
 
     #[test]
     fn memory_allocation() {
-        let net = MLP::new(2, 0.01, [
+        let net = MLP::new(2, 0.01, Optimizer::SGD, [
             Layer::new(2, 3, ActivationType::ReLu),
             Layer::new(3, 1, ActivationType::Linear)],
         );
