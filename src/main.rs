@@ -11,15 +11,6 @@ fn mse_prime(y_true: &Matrix, y_pred: &Matrix) -> Matrix {
     2. * t / (y_true.len() as f32)
 }
 
-fn print_matrix(matrix: &Matrix) { // It is only for debugging
-    for i in 0..matrix.rows {
-        for j in 0..matrix.cols {
-            print!("{} ", matrix.read_from_index([i, j]));
-        }
-        println!("");
-    }
-}
-
 fn main() {
     let start = Instant::now();
     let input_data: Vec<Matrix> = vec![Matrix::from([0., 0.], 2, 1),
