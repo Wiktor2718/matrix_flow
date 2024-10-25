@@ -1,8 +1,7 @@
-use matrix_flow::{neural_net::{adam::Adam, mlp::Optimizer}, prelude::*};
-use std::{fs::File, iter::zip, path::Path, time::Instant};
-use std::{io, error::Error};
+use std::{fs::File, iter::zip, path::Path, error::Error};
+use matrix_flow::prelude::*;
 
-fn read_labeled_data<P: AsRef<Path>>(path: P, output_size: usize, batch_size: usize) -> Result<(Vec<Matrix>, Vec<Matrix>), Box<dyn Error>> {
+fn read_labeled_data<P: AsRef<Path>>(path: P, output_size: usize, batch_size: usize, max_value: ValueType) -> Result<(Vec<Matrix>, Vec<Matrix>), Box<dyn Error>> {
     let file = File::open(path)?;
     let mut rdr = csv::Reader::from_reader(file);
 
@@ -29,8 +28,11 @@ fn read_labeled_data<P: AsRef<Path>>(path: P, output_size: usize, batch_size: us
         }
 
         // move to gpu
-        let item_batch = Matrix::from(&item_buffer, batch_size, item.len());
+        let mut item_batch = Matrix::from(&item_buffer, batch_size, item.len());
         let label_batch = Matrix::from(&label_buffer, batch_size, output_size);
+
+        // renormalize items on the gpu
+        item_batch = item_batch / max_value;
 
         // clearning the bufers
         item_buffer.clear();
@@ -44,50 +46,74 @@ fn read_labeled_data<P: AsRef<Path>>(path: P, output_size: usize, batch_size: us
     Ok((res_labels, res_items))
 }
 
-fn mse(y_true: &Matrix, y_pred: &Matrix) -> f32 {
-    let t = y_pred - y_true;
-    t.sqware().as_vec().iter().sum::<ValueType>() / (t.len() as f32)
-}
-
-fn mse_prime(y_true: &Matrix, y_pred: &Matrix) -> Matrix {
-    let t = y_pred - y_true;
-    2. * t / (y_true.len() as f32)
-}
+/*
+rande_push() and range_pop()
+are for nvtx benchmarking
+*/
 
 fn main() {
-    let start = Instant::now();
-    let (output_data, input_data) = read_labeled_data("data_sets/mnist_train.csv", 10, 128).expect("Can't read");
+    // Parameters
+    const EPOCHS: u32 = 100;
+    const BATCH_SIZE: usize = 128;
 
     let layers = [
         Layer::new(28*28,  100, ActivationType::Tanh),
         Layer::new(100, 100, ActivationType::Tanh),
         Layer::new(100, 10,    ActivationType::Linear),
     ];
-    let optim = Optimizer::SGD;
-    let network  = MLP::new(128, 0.001, optim, layers);
 
-    // train pass
-    const EPOCHS: u32 = 100;
+    range_push("Data Loading");
+    let (output_data, input_data) = read_labeled_data(
+        "data_sets/mnist_train.csv",
+        10,
+        BATCH_SIZE,
+        255.
+    ).expect("Can't read");
 
+    range_pop();
+
+    range_push("Adam init");
+    let optim = Optimizer::Adam(Adam::new(layers, 0.9, 0.999, 1e-8));
+    range_pop();
+
+    range_push("Network init");
+    let network  = MLP::new(BATCH_SIZE, 0.001, optim, layers);
+    range_pop();
+
+    range_push("Training");
     for e in 0..EPOCHS {
         let mut error: f32 = 0.;
         for (x, y) in zip(&input_data, &output_data) {
+            range_push("Forward Pass");
             let output = network.forward(x);
+            range_pop();
 
+            range_push("Error Calculation");
             error += mse(y, &output);
-
+            range_pop();
+            
+            range_push("Gradient Calculation");
             let gradient = mse_prime(y, &output);
+            range_pop();
+
+            range_push("Backward Pass");
             let _ = network.backward(&gradient);
+            range_pop();
         }
         println!("{e}: {}", error / input_data.len() as f32);
     }
-    println!("it took {:?}", start.elapsed());
+    range_pop();
 
     // save space in vram
     drop(output_data);
     drop(input_data);
 
-    let (output_data, input_data) = read_labeled_data("data_sets/mnist_test.csv", 10, 128).expect("Can't read");
+    let (output_data, input_data) = read_labeled_data(
+        "data_sets/mnist_test.csv",
+        10,
+        128,
+        255.
+    ).expect("Can't read");
 
     // test run
     let mut error: f32 = 0.;
