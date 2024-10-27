@@ -119,6 +119,12 @@ pub enum Optimizer {
     // all possible optimizers
 }
 
+impl Optimizer {
+    pub fn adam<T: AsRef<[Layer]>>(layers: T, beta1: ValueType, beta2: ValueType, epsilon: ValueType) -> Self {
+        Self::Adam(Adam::new(layers, beta1, beta2, epsilon))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::neural_net::mlp::{MLP, ActivationType, Layer, Optimizer};
