@@ -1,3 +1,49 @@
+# Matrix Flow
+
+This project is a simple machine learning library written in Rust and CUDA.
+It provides an API to manipulate matrices as well as specially optimized
+neural networks.
+
+## Features
+
+- **GPU-accelerated computation** using CUDA
+- **Multi-layer perceptron (MLP)** with customizable layers and activation functions
+- **Adam optimizer** for efficient gradient-based learning
+- Supports **batch training** for improved efficiency
+- **NVTX benchmarking** for performance profiling
+
+## Prerequisites
+
+### Install Rust
+- **Rust**: Install Rust from the [official website](https://www.rust-lang.org/).
+
+### Install Cuda Toolkit
+- **CUDA Toolkit**: Make sure you have CUDA installed on your system. The default library paths
+  are set up for Linux, but you may need to adjust these for your specific environment.
+
+### Install Sample Data Sets
+- **CSV Data**: The example provided expects labeled datasets in CSV format for both training and testing.
+
+## Running The Sample MLP
+
+- make sure that the GPU architecture in the build.rs is correct
+  ```rs
+  let cuda_arch = "sm_86"; // Adjust the architecture as needed
+  ```
+- if you have a non-standard path to cuda libraries modify this line  
+  ```rs
+  let cuda_lib_path = "/usr/local/cuda/lib64"; // Adjust this path as necessary
+  ```
+- run `cargo run`
+
+## Memory optimizations
+
+This library avoids additional memory allocations by reusing the memory of the
+owned operand: `A + &B` reuses the memory of A; `&A + B` reuses the memory of B;
+`&A + &B` allocates new memory.
+
+## Example use (networks)
+```rs
 use std::{fs::File, iter::zip, path::Path, error::Error};
 use matrix_flow::prelude::*;
 
@@ -118,3 +164,4 @@ fn main() {
     }
     println!("test loss: {}", error / input_data.len() as f32);
 }
+```
