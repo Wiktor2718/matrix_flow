@@ -1,5 +1,7 @@
 # Matrix Flow
 Matrix Flow is a simple machine learning library written in Rust and CUDA.
+It was created as a portfolio project to deepen my understanding of machine
+learning, GPU programming, and Rust.
 It provides an API for matrix manipulation and includes specially optimized neural networks.
 
 ## Features
