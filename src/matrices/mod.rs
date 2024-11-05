@@ -7,3 +7,5 @@ pub mod scalar_matrix_operations;
 pub mod matrix_operations;
 pub mod random;
 pub mod nvtx;
+pub mod matrix_compare;
+pub mod vec_compare;

@@ -247,6 +247,89 @@ extern "C" void uniform(value_type *res, size_t len) {
     cudaFree(&d_states);
 }
 
+// PartailEq
+#define cmp_kernel_flat(name, type) \
+    __global__ void name(type *a, type *b, int *res, size_t len) { \
+        int idx = blockIdx.x * blockDim.x + threadIdx.x; \
+        if (idx < len && a[idx] != b[idx]) atomicMin(res, 0); \
+    }
+
+#define cmp_kernel_t(name, type) \
+    __global__ void name(type *a, type *b, int *res, size_t rows, size_t cols, size_t len) { \
+        int idx = blockIdx.x * blockDim.x + threadIdx.x; \
+        size_t index = (idx * cols) % (rows * cols) + idx / rows; \
+        if (idx < len && a[idx] != b[index]) atomicMin(res, 0); \
+    }
+
+#define comparison_flat(name, kernel, type) \
+    extern "C" int name(type a, type b, size_t len) { \
+        int *res_device; \
+        cudaMalloc((void**)&res_device, sizeof(int)); \
+        int res_host = 1; \
+        cudaMemcpy(res_device, &res_host, sizeof(int), cudaMemcpyHostToDevice); \
+        \
+        int threadsPerBlock = 256; \
+        int blocksPerGrid = (len + threadsPerBlock - 1) / threadsPerBlock; \
+        kernel<<<blocksPerGrid, threadsPerBlock>>>(a, b, res_device, len); \
+        cudaDeviceSynchronize(); \
+        \
+        cudaMemcpy(&res_host, res_device, sizeof(int), cudaMemcpyDeviceToHost); \
+        cudaFree(res_device); \
+        \
+        return res_host; \
+    }
+
+cmp_kernel_flat(_matrix_value_type_cmp_flat, value_type)
+cmp_kernel_t(_matrix_value_type_cmp_t, value_type)
+
+extern "C" int matrix_value_type_cmp(Matrix a, Matrix b, size_t len) {
+    int *res_device;
+    cudaMalloc((void**)&res_device, sizeof(int));
+    int res_host = 1;
+    cudaMemcpy(res_device, &res_host, sizeof(int), cudaMemcpyHostToDevice);
+
+    int threadsPerBlock = 256;
+    int blocksPerGrid = (len + threadsPerBlock - 1) / threadsPerBlock;
+    if (a.row_major == b.row_major) {
+        _matrix_value_type_cmp_flat<<<blocksPerGrid, threadsPerBlock>>>(a.data, b.data, res_device, len);
+    } else {
+        _matrix_value_type_cmp_t<<<blocksPerGrid, threadsPerBlock>>>(a.data, b.data, res_device, a.rows, a.cols, len);
+    }
+    cudaDeviceSynchronize();
+
+    cudaMemcpy(&res_host, res_device, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaFree(res_device);
+
+    return res_host;
+}
+
+// vectors
+cmp_kernel_flat(_vec_usize_cmp, size_t)
+cmp_kernel_flat(_vec_i8_cmp,    int8_t)
+cmp_kernel_flat(_vec_i16_cmp,   int16_t)
+cmp_kernel_flat(_vec_i32_cmp,   int32_t)
+cmp_kernel_flat(_vec_i64_cmp,   int64_t)
+
+cmp_kernel_flat(_vec_u8_cmp,    uint8_t)
+cmp_kernel_flat(_vec_u16_cmp,   uint16_t)
+cmp_kernel_flat(_vec_u32_cmp,   uint32_t)
+cmp_kernel_flat(_vec_u64_cmp,   uint64_t)
+
+cmp_kernel_flat(_vec_f32_cmp,   float)
+cmp_kernel_flat(_vec_f64_cmp,   double)
+
+comparison_flat(vec_usize_cmp, _vec_usize_cmp, size_t*)
+comparison_flat(vec_i8_cmp,    _vec_i8_cmp,    int8_t*)
+comparison_flat(vec_i16_cmp,   _vec_i16_cmp,   int16_t*)
+comparison_flat(vec_i32_cmp,   _vec_i32_cmp,   int32_t*)
+comparison_flat(vec_i64_cmp,   _vec_i64_cmp,   int64_t*)
+comparison_flat(vec_u8_cmp,    _vec_u8_cmp,    uint8_t*)
+comparison_flat(vec_u16_cmp,   _vec_u16_cmp,   uint16_t*)
+comparison_flat(vec_u32_cmp,   _vec_u32_cmp,   uint32_t*)
+comparison_flat(vec_u64_cmp,   _vec_u64_cmp,   uint64_t*)
+comparison_flat(vec_f32_cmp,   _vec_f32_cmp,   float*)
+comparison_flat(vec_f64_cmp,   _vec_f64_cmp,   double*)
+
 // MLP
 typedef struct {
     value_type *ptr;
