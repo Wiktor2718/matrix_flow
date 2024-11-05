@@ -450,3 +450,79 @@ extern "C" void adam_update_params(
         beta1, beta2, beta1_t, beta2_t, 
         learning_rate, epsilon, D, M);
 }
+
+// Losses
+__global__ void _mse_prime(value_type *grad, value_type *y_true, value_type *y_pred, value_type scale, size_t len) {
+    size_t i = threadIdx.x + blockIdx.x * blockDim.x;
+    if (i < len) {
+        value_type t = y_pred[i] - y_true[i];
+        grad[i] = t * scale;
+    }
+}
+
+extern "C" void mse_prime_launcher(RM_Handle grad, RM_Handle y_true, RM_Handle y_pred) {
+    size_t len = grad.rows * grad.cols;
+    int block_size = BLOCK_SIZE;
+    int grid_size = (len + block_size - 1) / block_size;
+
+    value_type scale = 2.0f / len;
+
+    _mse_prime<<<grid_size, block_size>>>(grad.ptr, y_true.ptr, y_pred.ptr, scale, len);
+}
+
+#include <stdio.h>
+#include <cuda.h>
+
+// CUDA kernel to compute Mean Squared Error
+__global__ void mse_kernel(value_type *mse, const value_type *y_true, const value_type *y_pred, size_t len) {
+    extern __shared__ float shared_data[];
+
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int tid = threadIdx.x;
+
+    // Each thread computes its squared error
+    float error = 0.0f;
+    if (idx < len) {
+        float diff = y_pred[idx] - y_true[idx];
+        error = diff * diff;
+    }
+
+    // Store the error in shared memory
+    shared_data[tid] = error;
+    __syncthreads();
+
+    // Reduce the error within each block
+    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            shared_data[tid] += shared_data[tid + s];
+        }
+        __syncthreads();
+    }
+
+    // Accumulate the block results in the first thread of each block
+    if (tid == 0) {
+        atomicAdd(mse, shared_data[0]);
+    }
+}
+
+extern "C" value_type compute_mse(RM_Handle y_true, RM_Handle y_pred) {
+    size_t len = y_pred.rows * y_pred.cols;
+
+    value_type *d_mse;
+    value_type mse = 0.0f;
+
+    cudaMalloc((void**)&d_mse, sizeof(value_type));
+    cudaMemcpy(d_mse, &mse, sizeof(value_type), cudaMemcpyHostToDevice);
+
+    int blockSize = BLOCK_SIZE;
+    int gridSize = (len + blockSize - 1) / blockSize;
+    mse_kernel<<<gridSize, blockSize, blockSize * sizeof(value_type)>>>(d_mse, y_true.ptr, y_pred.ptr, len);
+
+    cudaMemcpy(&mse, d_mse, sizeof(value_type), cudaMemcpyDeviceToHost);
+
+    mse /= len;
+
+    cudaFree(d_mse);
+
+    return mse;
+}
